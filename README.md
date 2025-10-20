@@ -1,0 +1,2 @@
+# FlashDetail
+一个NoneBot插件，允许用户通过简单的聊天消息查询flash信息
