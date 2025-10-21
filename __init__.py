@@ -27,7 +27,7 @@ try:
 
 
     # 插件版本信息
-    PLUGIN_VERSION = "1.2.0"
+    PLUGIN_VERSION = "1.3.0"
     
     # 基础帮助文本（所有用户可见）
     BASE_HELP_TEXT = """目前支持的指令：
@@ -110,7 +110,7 @@ try:
         
         # 检查API连接状态
         try:
-            response = requests.get(f"{plugin_config.api_url}/api/v1/info", timeout=3)
+            response = requests.get(f"{plugin_config.api_url}", timeout=3)
             api_status = "正常" if response.status_code == 200 else "异常"
         except Exception:
             api_status = "连接失败"
@@ -206,7 +206,6 @@ try:
     async def opHandler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
         if not is_owner(user_id):
-            await op_cmd.finish("权限不足，只有所有者可以设置管理员")
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -224,7 +223,6 @@ try:
     async def deopHandler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
         if not is_owner(user_id):
-            await deop_cmd.finish("权限不足，只有所有者可以移除管理员")
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -242,7 +240,6 @@ try:
     async def banHandler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
         if not is_owner(user_id):
-            await ban_cmd.finish("权限不足，只有所有者可以封禁用户")
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -260,7 +257,6 @@ try:
     async def pardonHandler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
         if not is_owner(user_id):
-            await pardon_cmd.finish("权限不足，只有所有者可以解封用户")
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -405,7 +401,7 @@ def get_detail(arg: str, firstTime: bool = True) -> dict:
             formatted_output = result_to_text(result)
             if formatted_output == "无结果" and firstTime:
                 search_result = search(arg)
-                if search_result.get("result",False):
+                if len(search_result.get("data",[])):
                     return f"可能的料号：{search_result.get("data")[0].split(' ')[-1]} \n{get_detail(search_result.get("data")[0].split(' ')[-1],False)}"
             # 这里可以根据需要修改formatted_output
             return formatted_output
@@ -462,13 +458,9 @@ def search(arg: str) -> dict:
         return result
 
 
-def get_detail_from_ID(arg: str) -> dict:
+def get_detail_from_ID(arg: str) -> str:
     """处理ID：提取有效字符后，不足12位则补0"""
     if not arg.strip():
-        result = {"result": False, "error": "ID不能为空"}
-        # 在return前添加格式化输出
-        formatted_output = result_to_text(result)
-        # 这里可以根据需要修改formatted_output
         return "ID不能为空"
     try:
         # 提取有效字符（字母/数字）
@@ -508,30 +500,37 @@ def parse_micron_pn(arg:str) -> dict:
     micron_response = get_html_with_requests(micron_url)
     if not micron_response:
         return {"result": False, "error": "解码镁光料号失败"}
-    return json.loads(micron_response.text)
+    try:
+        # 尝试解析JSON响应
+        response_data = json.loads(micron_response.text)
+        # 确保返回的数据结构包含必要字段
+        if "detail" not in response_data and "part-number" in response_data:
+            # 如果part-number直接在根级别，将其移到detail字典中以保持一致性
+            response_data["detail"] = {"part-number": response_data["part-number"]}
+        return response_data
+    except json.JSONDecodeError:
+        return {"result": False, "error": "返回数据格式错误"}
 
-def get_dram_detail(arg: str) -> dict:
+def get_dram_detail(arg: str) -> str:
     """查询DRAM详情（适配DRAM专属API）"""
     if not arg.strip():
-        result = {"result": False, "error": "DRAM料号不能为空"}
-        # 在return前添加格式化输出
-        formatted_output = result_to_text(result)
-        # 这里可以根据需要修改formatted_output
-        return result
+        return "DRAM料号不能为空"
     try:
         pn = arg.strip()
         # 处理5位DRAM料号特殊逻辑
         if len(pn) == 5:
             micron_json = parse_micron_pn(pn)
             if not micron_json.get("result"):
-                result = {"result": False, "error": "未能获取完整DRAM料号"}
-                # 在return前添加格式化输出
-                formatted_output = result_to_text(result)
-                # 这里可以根据需要修改formatted_output
                 return "未能获取完整DRAM料号"
             
             # 获取完整的part-number并使用它调用DRAM接口
-            pn = micron_json["detail"]["part-number"]
+            # 兼容不同的数据结构：part-number可能在detail字典或直接在根级别
+            if "detail" in micron_json and "part-number" in micron_json["detail"]:
+                pn = micron_json["detail"]["part-number"]
+            elif "part-number" in micron_json:
+                pn = micron_json["part-number"]
+            else:
+                return "获取完整DRAM料号失败：找不到part-number字段"
         
         # 使用原始料号或从micron-online获取的完整料号调用DRAM接口
         url = f"https://fe-backend.barryblueice.cn/DRAM?param={pn}"
@@ -569,7 +568,7 @@ def get_dram_detail(arg: str) -> dict:
     except json.JSONDecodeError:
         return "DRAM API返回格式错误"
     except Exception as e:
-        return str(e)
+        return f"错误：{str(e)}"
 
 
 def result_to_text(arg: dict) -> str:
