@@ -8,7 +8,8 @@ import os
 class Config(BaseModel):
     # 核心配置字段
     admin_users: list[str] = ["1828665870"]  # 默认管理员包含所有者
-    api_url: str = "https://fd.sakuracg.com"
+    flash_detect_api_url: str = "https://fd.sakuracg.com"
+    flash_extra_api_url: str = "https://fe-backend.barryblueice.cn"
     whitelist_user: list[str] = []
     blacklist_user: list[str] = []
     whitelist_group: list[str] = []
@@ -28,7 +29,7 @@ class Config(BaseModel):
                 raise ValueError("所有者ID必须为字符串")
         return v
 
-    @field_validator("api_url")
+    @field_validator("flash_detect_api_url", "flash_extra_api_url")
     def api_url_must_be_valid(cls, v: str) -> str:
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("API URL必须以http://或https://开头")
@@ -61,17 +62,60 @@ class Config(BaseModel):
                 with open(path, "r", encoding="utf-8") as f:
                     config_data = json.load(f)
                 
-                # 确保所有必要的字段都存在
+                # 确保所有必要的字段都存在，并自动更新旧配置
                 default_config = cls()
-                for key, default_value in default_config.model_dump().items():
-                    if key not in config_data:
-                        config_data[key] = default_value
+                default_data = default_config.model_dump()
                 
-                config_data.update(kwargs)
-                config = cls(**config_data)
-                return config
-            except (IOError, json.JSONDecodeError, ValidationError) as e:
-                print(f"加载配置失败，使用默认配置并保存: {e}")
+                # 复制旧配置中的所有字段到新配置
+                updated_config = {**default_data, **config_data}
+                
+                # 更新额外的kwargs
+                updated_config.update(kwargs)
+                
+                # 尝试创建配置实例
+                try:
+                    config = cls(**updated_config)
+                    # 检查是否需要保存更新后的配置
+                    needs_update = False
+                    for key, value in default_data.items():
+                        if key not in config_data:
+                            needs_update = True
+                            print(f"自动添加配置项: {key} = {value}")
+                    
+                    if needs_update:
+                        config.save_all(path)
+                        print(f"配置已自动更新: {path}")
+                    
+                    return config
+                except ValidationError as e:
+                    print(f"配置验证失败，尝试修复: {e}")
+                    # 验证失败时，逐个字段尝试修复
+                    fixed_config = {}
+                    for key, default_value in default_data.items():
+                        try:
+                            # 尝试使用旧配置的值
+                            if key in config_data:
+                                # 使用Pydantic的验证机制检查单个字段
+                                validator = getattr(cls, f"validate_{key}", None)
+                                if validator:
+                                    fixed_config[key] = validator(config_data[key])
+                                else:
+                                    fixed_config[key] = config_data[key]
+                            else:
+                                fixed_config[key] = default_value
+                        except Exception:
+                            # 字段验证失败，使用默认值
+                            print(f"字段 {key} 验证失败，使用默认值: {default_value}")
+                            fixed_config[key] = default_value
+                    
+                    # 使用修复后的配置
+                    config = cls(**fixed_config)
+                    config.save_all(path)
+                    print(f"配置已修复并保存: {path}")
+                    return config
+                    
+            except (IOError, json.JSONDecodeError) as e:
+                print(f"加载配置文件失败，使用默认配置: {e}")
                 # 创建默认配置并保存
                 config = cls(**kwargs)
                 config.save_all(path)
@@ -84,29 +128,32 @@ class Config(BaseModel):
             return config
     
     def load_config(self, path: str = None) -> None:
-        """从文件重新加载配置到当前实例"""
+        """从文件重新加载配置到当前实例，支持自动更新旧版配置"""
         # 如果没有指定路径，使用插件目录下的config.json
         if path is None:
             plugin_dir = os.path.dirname(os.path.abspath(__file__))
             path = os.path.join(plugin_dir, "config.json")
         
-        if Path(path).exists():
+        try:
+            # 使用增强版的from_file方法，它会自动处理旧配置
+            new_config = self.from_file(path)
+            
+            # 更新当前实例的所有字段
+            for key, value in new_config.model_dump().items():
+                if hasattr(self, key):
+                    setattr(self, key, value)
+            
+            print(f"配置已成功重载: {path}")
+        except Exception as e:
+            print(f"重载配置时遇到问题，但将继续使用自动修复的配置: {e}")
+            # 即使有异常，from_file方法也会返回可用的配置，所以继续更新当前实例
             try:
-                # 先创建一个新的实例以确保验证通过
                 new_config = self.from_file(path)
-                
-                # 验证通过后，更新当前实例的所有字段
                 for key, value in new_config.model_dump().items():
                     if hasattr(self, key):
                         setattr(self, key, value)
-                
-                print(f"配置已从{path}重载")
-            except (IOError, json.JSONDecodeError, ValidationError) as e:
-                print(f"重载配置失败: {e}")
-                raise
-        else:
-            print(f"配置文件不存在: {path}")
-            raise FileNotFoundError(f"配置文件不存在: {path}")
+            except Exception:
+                print("无法完全修复配置，部分设置可能使用默认值")
 
     def is_valid_user(self, args: list[str]) -> bool:
         # 检查参数有效性
@@ -132,3 +179,5 @@ class Config(BaseModel):
             return False
         
         return True
+
+config_instance=Config.from_file()
