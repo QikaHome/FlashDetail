@@ -507,7 +507,7 @@ translations = {
     "id": "", "vendor": "厂商：", "die": "Die数量：", "plane": "平面数：",
     "pageSize": "页面大小：", "blockSize": "块大小：", "processNode": "制程：",
     "cellLevel": "单元类型：", "partNumber": "料号：", "type": "类型：", "density": "容量：",
-    "channel": "通道数：","ce": "片选：","die": "Die数量：",
+    "channel": "通道数：","ce": "片选：","die": "Die数量：","availablePn": "可能的料号：",
     "deviceWidth": "位宽：","voltage": "电压：", "generation": "代数：", "package": "封装：", 
     "availableID": "可能的ID：","depth": "深度：","grade": "等级：","speed": "速度：",
     "vendor_code": "厂商代码：","version": "版本：","width": "位宽："
@@ -534,10 +534,10 @@ def result_to_text(arg: dict) -> str:
                 trans=translations.get(key, None)
                 if trans:
                     result += f"{trans}{value}\n"
+        if(result.count("\n")<2):
+            result=""
     elif isinstance(data, list):
-        result += f"{translations['availableID']}{', '.join(data)}\n"
-    if(result.count("\n")<2):
-        result=""
+        result += f"{translations['availablePn']}{', '.join(data)}\n"
     return result
 
 def all_numbers_alpha(string: str) -> bool:
@@ -560,14 +560,14 @@ def 查(arg: str, retry: bool=True, refresh: bool=False,debug: bool=False) -> st
     if not result and retry:
         search_result = FDQueryMethods.search(arg)
         if search_result.get("result", False) and search_result.get("data", []):
-            result = 查(search_result["data"][0], False,debug)
+            result = f"可能的料号：{search_result["data"][0].split()[-1]}\n{查(search_result["data"][0].split()[-1], False,debug)}"
     if not result:
         if all_numbers_alpha(arg):
             result = "无结果"
     return result
 
 def 搜(arg: str,debug: bool=False) -> str:
-    result = result_to_text(FDQueryMethods.search(arg))
+    result = result_to_text(FDQueryMethods.search(arg,debug))
     if not result:
         if all_numbers_alpha(arg):
             result = "无结果"
@@ -597,14 +597,14 @@ def get_message_result(message: str) -> str:
         result = ""
         # 新增：处理DRAM查询指令（支持大小写不敏感）
         if message.lower().startswith("查dram"):
-            result = 查DRAM(message[6:].strip(), refresh_flag,debug_flag)
+            result = 查DRAM(message[6:].strip(), refresh=refresh_flag,debug=debug_flag)
         # 原有Flash查询指令
         elif message.lower().startswith(("id")):
-            result = ID(message[2:].strip(), refresh_flag,debug_flag)
+            result = ID(message[2:].strip(), refresh=refresh_flag,debug=debug_flag)
         elif message.startswith(("查")):
-            result = 查(message[1:].strip(), refresh_flag,debug_flag)
+            result = 查(message[1:].strip(), refresh=refresh_flag,debug=debug_flag)
         elif message.startswith(("搜")):
-            result = 搜(message[1:].strip(),debug_flag)
+            result = 搜(message[1:].strip(),debug=debug_flag)
         else:
             result = "未知命令(请使用/help获取帮助)"
         return result
