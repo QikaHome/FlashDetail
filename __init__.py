@@ -11,6 +11,8 @@ try:
     from nonebot.adapters import Event, Message
     from nonebot.rule import startswith
     from nonebot.params import CommandArg
+    from nonebot.adapters.onebot.v11 import Event as V11Event
+    from nonebot.adapters.onebot.v11 import Bot as V11Bot
 
     async def is_enabled_for(event: Event) -> bool:
         return plugin_config.is_valid_user(event.get_session_id().split("_"))
@@ -26,61 +28,202 @@ try:
 
 
     # 插件版本信息
-    PLUGIN_VERSION = "2.0.0"
+    PLUGIN_VERSION = "3.0.0"
     
     # 基础帮助文本（所有用户可见）
-    BASE_HELP_TEXT = """目前支持的指令：
-    查 [料号] → 精确查询Flash料号详情
-    搜 [部分料号] → 模糊搜索Flash料号
-    ID [颗粒ID] → 解析Flash颗粒ID（不足12位自动补0）
-    查DRAM [料号] → 精确查询DRAM料号详情（例：查DRAM NT5AD1024M8C3-HR）
-    /micron [料号] → 解析Micron料号并返回完整part-number
-    /help → 显示此帮助内容
-    /status → 显示插件状态信息
-    /version → 显示插件版本信息"""
+    BASE_HELP_TEXT = """
+FlashDetail插件使用说明
+
+基础查询命令：
+    ID <id> - 根据闪存ID查询详细信息
+    查 <料号> - 查询闪存详情，支持部分料号搜索，自动尝试搜索和Micron料号解析
+    搜 <关键词> - 搜索相关料号
+    查DRAM <料号/ID> - 查询DRAM内存信息
+    撤回 - 回复消息并发送此命令可撤回被回复消息（非管理员只能撤回自己的消息）
+    /micron <料号> - 解析Micron料号获取完整料号
+
+    其他命令：
+        /status - 显示插件运行状态
+        /version - 显示插件版本信息
+        /help - 显示此帮助信息
+
+    提示：
+    - 所有查询命令均可添加 --refresh 参数强制刷新缓存
+    - 所有查询命令均可添加 --debug 参数显示调试信息
+    - 所有查询命令均可添加 --url 参数指定查询api地址
+    - 所有非"无结果"的查询结果会自动缓存，提高后续查询速度"""
     
     # 管理员帮助文本（仅管理员和所有者可见）
     ADMIN_HELP_TEXT = """
-    管理员命令：
-    /api <url> → 显示/修改FlashDetector地址（仅管理员）
-    黑白名单管理（仅管理员）：
-    /whitelist add <user/group> <id> → 添加到白名单
-    /whitelist remove [user/group] [id] → 移除（可省略参数）
-    /whitelist list [user/group] → 列出（可省略参数）
-    /blacklist 命令格式与whitelist相同"""
+
+管理员命令：
+    /whitelist add/list/remove - 管理白名单用户/群组
+    /blacklist add/list/remove - 管理黑名单用户/群组
+    /api - 显示api相关信息（具体用法使用/api help）
+
+    白名单/黑名单命令格式：
+        /whitelist add user/group <id> - 添加用户/群组到白名单
+        /whitelist remove user/group <id> - 从白名单移除用户/群组
+        /whitelist list [user/group] - 显示白名单（可选指定类型）
+        /whitelist remove - 清空所有白名单
+        /whitelist remove user/group - 清空指定类型白名单
+
+    （黑名单命令格式与白名单相同）
+
+    快捷封禁/解封命令：
+        /ban <user_id> - 将用户加入黑名单（不能封禁管理员）
+        /pardon <user_id> - 将用户从黑名单移除"""
     
     # 所有者帮助文本（仅所有者可见）
     OWNER_HELP_TEXT = """
-    所有者命令：
-    /reload → 重载配置文件（仅所有者）
-    快捷命令（所有者专用）：
-    /op <user_id> → 将用户设为管理员
-    /deop <user_id> → 移除用户的管理员权限
-    /ban <user_id> → 将用户加入黑名单
-    /pardon <user_id> → 将用户从黑名单移除
-    管理员管理（仅所有者）：
-    /admin add <id> → 添加管理员
-    /admin remove <id> → 移除管理员
-    /admin list → 列出所有管理员"""
+
+所有者命令：
+    /admin add/list/remove - 管理管理员列表
+    /op <user_id> - 设置指定用户为管理员
+    /deop <user_id> - 移除用户的管理员权限
+    /reload - 重载插件
+    /config - 管理插件配置（仅所有者可用）
+
+    管理员命令格式：
+        /admin add <user_id> - 添加管理员
+        /admin remove <user_id> - 移除管理员（不能移除所有者）
+        /admin list - 列出所有管理员及所有者
+
+    配置命令格式：
+        /config list - 显示当前配置状态
+        /config <选项名> <值> - 设置配置项（如true/false或数字）
+"""
+
+    
     
     # 命令定义
-    whitelist_cmd = on_command("whitelist", priority=1, rule=is_enabled_for, block=True)
-    blacklist_cmd = on_command("blacklist", priority=1, rule=is_enabled_for, block=True)
-    admin_cmd = on_command("admin", priority=1, rule=is_enabled_for, block=True)  # 管理员管理命令
-    micron_cmd = on_command("micron", priority=1, rule=is_enabled_for, block=False)  # Micron料号解析命令
+    whitelist_cmd = on_command("whitelist", priority=1, rule=is_enabled_for, block=False)
+    blacklist_cmd = on_command("blacklist", priority=1, rule=is_enabled_for, block=False)
+    admin_cmd = on_command("admin", priority=1, rule=is_enabled_for, block=False)  # 管理员管理命令
+    micron_cmd = on_command("micron", priority=1, rule=is_enabled_for, block=False)  # Micron料号解析命令   
     listened_commands = startswith(("ID", "查", "搜"), ignorecase=True)
     MessageHandler = on_message(priority=10, rule=is_enabled_for & listened_commands, block=False)
     help_cmd = on_command("help", priority=1, rule=is_enabled_for, block=False)
     api_cmd = on_command("api", priority=1, rule=is_enabled_for, block=False)
-    api_fe_cmd = on_command("api_fe", priority=1, rule=is_enabled_for, block=False)  # 不显示在帮助中
     reload_cmd = on_command("reload", priority=1, rule=is_enabled_for, block=False)
     status_cmd = on_command("status", priority=1, rule=is_enabled_for, block=False)
     version_cmd = on_command("version", priority=1, rule=is_enabled_for, block=False)
-    op_cmd = on_command("op", priority=1, rule=is_enabled_for, block=True)
-    deop_cmd = on_command("deop", priority=1, rule=is_enabled_for, block=True)
-    ban_cmd = on_command("ban", priority=1, rule=is_enabled_for, block=True)
-    pardon_cmd = on_command("pardon", priority=1, rule=is_enabled_for, block=True)
+    op_cmd = on_command("op", priority=1, rule=is_enabled_for, block=False)  # 管理员管理命令
+    deop_cmd = on_command("deop", priority=1, rule=is_enabled_for, block=False)
+    ban_cmd = on_command("ban", priority=1, rule=is_enabled_for, block=False)
+    pardon_cmd = on_command("pardon", priority=1, rule=is_enabled_for, block=False)
+    refresh_cmd = on_command("refresh", priority=1, rule=is_enabled_for, block=False)
+    config_cmd = on_command("config", priority=1, rule=is_enabled_for, block=False)
+    喵 = on_message(priority=10, rule=is_enabled_for, block=False)
+    repeater = on_message(priority=10, rule=is_enabled_for, block=False)
+    撤回_cmd = on_message(priority=10, rule=is_enabled_for, block=False)
+    whoami_cmd = on_command("whoami", priority=1, block=False)
 
+    # 查看当前用户ID
+    @whoami_cmd.handle()
+    async def whoami(event: Event):
+        user_id = event.get_user_id()
+        await whoami_cmd.send(f"您的用户ID是：{user_id}")
+
+    def is_key_word(message_text:str) -> bool:
+        return message_text and any([i in message_text.lower() for i in ["撤回","/","查","id"]])
+    # 撤回
+    @撤回_cmd.handle()
+    async def 撤回(event: V11Event, bot: V11Bot):
+        
+        # 获取消息内容
+        message_text = event.get_message().extract_plain_text().strip()
+        
+        # 检查是否包含"撤回"关键词
+        if "撤回" not in message_text:
+            return
+        
+        # 检查是否是回复消息
+        if event.reply:
+            print(event.reply)
+            # 获取被回复的消息ID
+            reply_message_id = event.reply.message_id
+            # 检查是否是管理员或者撤回目标是用户自己的消息
+            if not is_admin(event.get_user_id()) and not event.get_user_id() != event.reply.sender:
+                return
+            try:
+                # 尝试撤回消息
+                await bot.delete_msg(message_id=reply_message_id)
+            except Exception as e:
+                # 撤回失败（可能没有权限）
+                await 撤回_cmd.send(f"撤回失败，可能没有权限：{str(e)}")
+    
+
+    last_message:dict[str,list[str,int]] = {}  # 格式：{session_id: [last_message, times]}
+
+    # 复读机
+    @repeater.handle()
+    async def repeater_handler(event: Event):
+        if(is_key_word(event.get_message().extract_plain_text())):
+            return
+        session_id = event.get_session_id().split("_")
+        if(session_id[0]!="group"):
+            return
+        session_id=session_id[1]
+        if(event.get_message().extract_plain_text() == last_message.get(session_id,["",0])[0]):
+            last_message[session_id][1] += 1
+        else:
+            last_message[session_id] = [event.get_message().extract_plain_text(), 1]
+        if(plugin_config.configs["repeater"] and last_message[session_id][1]>=plugin_config.configs["repeater"]):
+            result=last_message[session_id][0]
+            last_message[session_id]=["",0]
+            (await repeater.finish(result)) if result else repeater.finish()
+
+
+    # 喵喵喵
+    @喵.handle()
+    async def 喵_handler(event: Event):
+        if(plugin_config.configs["cat"] and "喵" in event.get_message().extract_plain_text()):
+            await 喵.finish("喵")
+    
+
+    def parse_config_value(value: str) -> Any:
+        if value.lower() in ["true", "yes"]:
+            return True
+        elif value.lower() in ["false", "no"]:
+            return False
+        elif value.isdigit():
+            return int(value)
+        else:
+            return value
+
+    # 配置管理命令
+    @config_cmd.handle()
+    async def config_handler(event: Event, arg: Message = CommandArg()):
+        user_id = event.get_user_id()
+        if not is_owner(user_id):
+            await config_cmd.finish("")
+            return
+        args = arg.extract_plain_text().strip().split()
+        if not args:
+            args=["list"]
+
+        # 显示当前配置
+        if args[0] == "list":
+            result="当前配置状态：\n"
+            for key, value in plugin_config.configs.items():
+                result += f"{key}: {value}\n"
+            await config_cmd.finish(result)
+        
+        # 设置其他配置项
+        elif args[0] in plugin_config.configs.keys():
+            value = parse_config_value(args[1].lower())
+            if type(value) == type(plugin_config.configs[args[0]]):
+                plugin_config.configs[args[0]] = value
+                plugin_config.save_all()
+                await config_cmd.finish(f"已设置{args[0]}为{value}")
+            
+            else:
+                await config_cmd.finish(f"值错误，请使用{type(plugin_config.configs[args[0]]).__name__}类型")
+    
+        
+        else:
+            await config_cmd.finish("未知的配置项，请使用：auto_accept_friend 或 auto_join_group")
 
     # 重载配置
     @reload_cmd.handle()
@@ -100,9 +243,7 @@ try:
     @status_cmd.handle()
     async def status_handler(event: Event):
         # 获取配置状态信息
-        status_info = [
-            f"FlashDetect API地址: {plugin_config.flash_detect_api_url}"
-        ]
+        status_info = []
         status_info.append("FlashDetail 插件状态信息")
         status_info.append(f"版本: {PLUGIN_VERSION}")
         # 移除不再使用的api_url引用
@@ -112,14 +253,6 @@ try:
         status_info.append(f"白名单群组数: {len(plugin_config.whitelist_group)}")
         status_info.append(f"黑名单用户数: {len(plugin_config.blacklist_user)}")
         status_info.append(f"黑名单群组数: {len(plugin_config.blacklist_group)}")
-        
-        # 检查API连接状态
-        try:
-            response = requests.get(f"{plugin_config.flash_detect_api_url}", timeout=3)
-            api_status = "正常" if response.status_code == 200 else "异常"
-        except Exception:
-            api_status = "连接失败"
-        status_info.append(f"API连接状态: {api_status}")
         
         await status_cmd.finish("\n".join(status_info))
     
@@ -172,51 +305,108 @@ try:
         user_id = event.get_user_id()
         arg_text = arg.extract_plain_text().strip()
         parts = arg_text.split() if arg_text else []
-        
-        if not parts:
-            await api_cmd.finish(f"当前的api地址是：{plugin_config.flash_detect_api_url}")
-            return
-        elif len(parts) == 1:
-            if user_id in plugin_config.admin_users:
-                url = parts[0]
+        if not parts:parts=["fd","list"]
+        if parts[0] == "help":
+            API_HELP_TEXT="""\
+命令格式：
+/api list - 列出API地址
+/api status - 检查API状态
+/api add <url> - 添加API地址
+/api del <url> - 删除API地址
+/api del --all - 删除所有API地址
+/api insert <index> <url> - 在指定位置插入API地址"""
+            await api_cmd.finish(API_HELP_TEXT)
+        if parts[0] != "fe" and parts[0] != "fd":
+            parts.insert(0,"fd")
+        if parts[0] == "fd":
+            if parts[1] == "list":
+                await api_cmd.finish(f"当前的api地址：{"".join(["\n   "+text for text in plugin_config.flash_detect_api_urls])}")
+            elif parts[1]=="status":
+                await api_cmd.finish(f"当前的api状态：{"".join(["\n"+url+":"+("正常" if FDQuery(url) else "异常") for url in plugin_config.flash_detect_api_urls])}")
+            elif parts[1]=="add":
+                if len(parts) != 3:
+                    await api_cmd.finish("指令格式错误，正确用法：/api add <url>")
+                url = parts[2]
                 if url[:4] not in ("http", "https"):
                     url = "http://" + url
                 if url[-1] == '/':
                     url = url[:-1]
-                plugin_config.flash_detect_api_url = url
+                plugin_config.flash_detect_api_urls.append(url)
                 plugin_config.save_all()
-                await api_cmd.finish(f"已将api地址设置为：{url}")
-            else:
-                await api_cmd.finish("你没有权限更改api地址")
-        else:
-            await api_cmd.finish("指令格式错误，正确用法：/api <url>（修改地址） 或 /api（显示地址）")
-
-
-    # FlashExtra API命令（不显示在帮助中）
-    @api_fe_cmd.handle()
-    async def api_fe_command_handler(event: Event, arg: Message = CommandArg()):
-        # 不再需要单独检查用户有效性，因为is_enabled_for规则已经做了检查
-        user_id = event.get_user_id()
-        arg_text = arg.extract_plain_text().strip()
-        parts = arg_text.split() if arg_text else []
-        
-        if not parts:
-            await api_fe_cmd.finish(f"当前的FlashExtra api地址是：{plugin_config.flash_extra_api_url}")
-            return
-        elif len(parts) == 1:
-            if user_id in plugin_config.admin_users:
-                url = parts[0]
+                await api_cmd.finish(f"已在flash_detector api地址添加：{url}")
+            elif parts[1]=="del":
+                if len(parts) == 2:
+                    await api_cmd.finish("若要移除所有的url地址，请使用/api del --all")
+                if len(parts) != 3:
+                    await api_cmd.finish("指令格式错误，正确用法：/api del <url>")
+                url = parts[2]
+                if url == "--all":
+                    plugin_config.flash_detect_api_urls.clear()
+                    plugin_config.save_all()
+                    await api_cmd.finish("已移除所有flash_detector api地址") 
+                if url in plugin_config.flash_detect_api_urls:
+                    plugin_config.flash_detect_api_urls.remove(url)
+                    plugin_config.save_all()
+                    await api_cmd.finish(f"已从flash_detector api地址删除：{url}")
+                else:
+                    await api_cmd.finish(f"flash_detector api地址列表中不存在：{url}")
+            elif parts[1] == "insert":
+                if len(parts) != 4:
+                    await api_cmd.finish("指令格式错误，正确用法：/api insert <index> <url>")
+                index = int(parts[2])
+                url = parts[3]
                 if url[:4] not in ("http", "https"):
                     url = "http://" + url
                 if url[-1] == '/':
                     url = url[:-1]
-                plugin_config.flash_extra_api_url = url
+                plugin_config.flash_detect_api_urls.insert(index, url)
                 plugin_config.save_all()
-                await api_fe_cmd.finish(f"已将FlashExtra api地址设置为：{url}")
-            else:
-                await api_fe_cmd.finish("你没有权限更改api地址")
-        else:
-            await api_fe_cmd.finish("指令格式错误，正确用法：/api_fe <url>（修改地址） 或 /api_fe（显示地址）")
+                await api_cmd.finish(f"已在flash_detector api地址列表的第{index}个位置插入：{url}")
+        elif parts[1] == "fe":
+            if parts[2] == "list":
+                await api_cmd.finish(f"当前的api地址：{"".join(["\n   "+text for text in plugin_config.flash_extra_api_urls])}")
+            elif parts[2]=="status":
+                await api_cmd.finish(f"当前的api状态：{"".join(["\n"+url+":"+("正常" if FDQuery(url) else "异常") for url in plugin_config.flash_extra_api_urls])}")
+            elif parts[2]=="add":
+                if len(parts) != 3:
+                    await api_cmd.finish("指令格式错误，正确用法：/api fe add <url>")
+                url = parts[2]
+                if url[:4] not in ("http", "https"):
+                    url = "http://" + url
+                if url[-1] == '/':
+                    url = url[:-1]
+                plugin_config.flash_extra_api_urls.append(url)
+                plugin_config.save_all()
+                await api_cmd.finish(f"已在flash_extra api地址添加：{url}")
+            elif parts[2]=="del":
+                if len(parts) == 2:
+                    await api_cmd.finish("若要移除所有的url地址，请使用/api fe del --all")
+                if len(parts) != 3:
+                    await api_cmd.finish("指令格式错误，正确用法：/api fe del <url>")
+                url = parts[2]
+                if url == "--all":
+                    plugin_config.flash_extra_api_urls.clear()
+                    plugin_config.save_all()
+                    await api_cmd.finish("已移除所有flash_extra api地址") 
+                if url in plugin_config.flash_extra_api_urls:
+                    plugin_config.flash_extra_api_urls.remove(url)
+                    plugin_config.save_all()
+                    await api_cmd.finish(f"已从flash_extra api地址删除：{url}")
+                else:
+                    await api_cmd.finish(f"flash_extra api地址列表中不存在：{url}")
+            elif parts[2] == "insert":
+                if len(parts) != 4:
+                    await api_cmd.finish("指令格式错误，正确用法：/api fe insert <index> <url>")
+                index = int(parts[2])
+                url = parts[3]
+                if url[:4] not in ("http", "https"):
+                    url = "http://" + url
+                if url[-1] == '/':
+                    url = url[:-1]
+                plugin_config.flash_extra_api_urls.insert(index, url)
+                plugin_config.save_all()
+                await api_cmd.finish(f"已在flash_extra api地址列表的第{index}个位置插入：{url}")
+
         
     # Micron料号解析命令
     @micron_cmd.handle()
@@ -225,19 +415,25 @@ try:
         args=arg.extract_plain_text().strip().split("--")
         args = [arga.strip() for arga in args]
         debug = "debug" in args
+        refresh = "refresh" in args
         pn = args[0]
         if not pn:
             await micron_cmd.finish("请输入Micron料号")
             return
         
+        # 转换为小写进行处理，确保不区分大小写
+        pn = pn.lower()
+        
         # 调用parse_micron_pn函数解析料号
-        result = FDQueryMethods.parse_micron_pn(pn,debug=debug)
+        result = FDQueryMethods.parse_micron_pn(pn, refresh=refresh, debug=debug)
+        
+        # 如果查询成功，调用accept()方法保存到数据库
+        if result.get("result") and hasattr(result, "accept"):
+            result.accept()
         
         # 检查并返回part-number
-        if "detail" in result and "part-number" in result["detail"]:
-            await micron_cmd.finish(f"完整料号: {result['detail']['part-number']}")
-        elif "part-number" in result:
-            await micron_cmd.finish(f"完整料号: {result['part-number']}")
+        if "data" in result and "part-number" in result["data"]:
+            await micron_cmd.finish(f"完整料号: {result['data']['part-number']}")
         else:
             error_msg = result.get("error", "解析失败，未找到料号信息")
             await micron_cmd.finish(error_msg)
@@ -316,7 +512,7 @@ try:
     @ban_cmd.handle()
     async def ban_handler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
-        if not is_owner(user_id):
+        if not is_admin(user_id):
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -324,6 +520,10 @@ try:
             return
         if target_id in plugin_config.blacklist_user:
             await ban_cmd.finish(f"用户 {target_id} 已在黑名单中")
+            return
+        # 禁止将管理员加入黑名单
+        if target_id in plugin_config.admin_users:
+            await ban_cmd.finish(f"不能将管理员 {target_id} 加入黑名单，请先移除其管理员权限")
             return
         plugin_config.blacklist_user.append(target_id)
         plugin_config.save_all()
@@ -333,7 +533,7 @@ try:
     @pardon_cmd.handle()
     async def pardon_handler(event: Event, arg: Message = CommandArg()):
         user_id = event.get_user_id()
-        if not is_owner(user_id):
+        if not is_admin(user_id):
             return
         target_id = arg.extract_plain_text().strip()
         if not target_id:
@@ -371,6 +571,9 @@ try:
             target_list = getattr(plugin_config, list_field)
             if target_id in target_list:
                 return f"{list_type}中已存在{target_type} {target_id}"
+            # 禁止将管理员加入黑名单
+            if list_type == "blacklist" and target_type == "user" and target_id in plugin_config.admin_users:
+                return f"不能将管理员 {target_id} 加入黑名单，请先移除其管理员权限"
             target_list.append(target_id)
             plugin_config.save_all()
             return f"已将{target_type} {target_id}添加到{list_type}"
@@ -485,6 +688,8 @@ try:
         else:
             return f"未知操作：{operation}，支持add/remove/list"
 
+    
+
 except Exception as e:
     print(f"not running in onebot: {e}")
 
@@ -532,11 +737,11 @@ def result_to_text(arg: dict) -> str:
                 result += func(value)
             else:
                 trans=translations.get(key, None)
-                if trans:
+                if trans!=None:
                     result += f"{trans}{value}\n"
         if(result.count("\n")<2):
             result=""
-    elif isinstance(data, list):
+    elif isinstance(data, list) and data:
         result += f"{translations['availablePn']}{', '.join(data)}\n"
     return result
 
@@ -544,30 +749,46 @@ def all_numbers_alpha(string: str) -> bool:
     # 使用正则表达式判断字符是否在0-9A-Za-z_/:-范围内
     return string and all(re.match(r'^[0-9A-Za-z_/:\-]$', c) for c in string)
 
-def ID(arg: str, refresh: bool=False,debug: bool=False) -> str:
-    raw_result=FDQueryMethods.get_detail_from_ID(arg, refresh)
+def ID(arg: str, refresh: bool=False,debug: bool=False,url:str|None=None) -> str:
+    # 转换为小写进行处理，确保不区分大小写
+    arg = arg.lower()
+    raw_result=FDQueryMethods.get_detail_from_ID(arg, refresh,debug,url)
     result = result_to_text(raw_result)
-    if result: raw_result["accept"]()
-    if not result:
+    if result and hasattr(raw_result, "accept"):
+        raw_result.accept()
+    if not result and len(arg)>3:
         if all_numbers_alpha(arg):
             result = "无结果"
     return result
 
-def 查(arg: str, retry: bool=True, refresh: bool=False,debug: bool=False) -> str:
-    raw_result=FDQueryMethods.get_detail(arg, refresh)
+def 查(arg: str, retry: bool=True, refresh: bool=False,debug: bool=False,url:str|None=None) -> str:
+    # 转换为小写进行处理，确保不区分大小写
+    arg = arg.lower()
+    raw_result=FDQueryMethods.get_detail(arg, refresh,debug,url)
     result = result_to_text(raw_result)
-    if result: raw_result["accept"]()
+    if result and "accept" in raw_result:
+        raw_result["accept"]()
     if not result and retry:
-        search_result = FDQueryMethods.search(arg)
+        search_result = FDQueryMethods.search(arg,debug,url)
         if search_result.get("result", False) and search_result.get("data", []):
-            result = f"可能的料号：{search_result["data"][0].split()[-1]}\n{查(search_result["data"][0].split()[-1], False,debug)}"
+            result = f"可能的料号：{search_result["data"][0].split()[-1]}\n{查(search_result["data"][0].split()[-1], False,debug,url)}"
+    if not result and len(arg.strip())==5:
+        micron_result=FDQueryMethods.parse_micron_pn(arg.strip(), refresh,debug)        
+        if micron_result.get("result", False) and micron_result.get("data", {}).get("part-number", ""):
+            if "accept" in micron_result:
+                micron_result["accept"]()
+            result = f"镁光料号：{micron_result.get('data', {}).get('part-number', '')}\n{查(micron_result.get('data', {}).get('part-number', ''), False,debug,url)}"
+        else: result = f"未知料号：{micron_result.get('error', '未知错误')}"
     if not result:
         if all_numbers_alpha(arg):
             result = "无结果"
     return result
 
-def 搜(arg: str,debug: bool=False) -> str:
-    result = result_to_text(FDQueryMethods.search(arg,debug))
+def 搜(arg: str,debug: bool=False,count: int=10) -> str:
+    # 转换为小写进行处理，确保不区分大小写
+    arg = arg.lower()
+    raw_result = FDQueryMethods.search(arg,debug,count)
+    result = result_to_text(raw_result)
     if not result:
         if all_numbers_alpha(arg):
             result = "无结果"
@@ -576,9 +797,12 @@ def 搜(arg: str,debug: bool=False) -> str:
 
 
 def 查DRAM(arg: str, refresh: bool=False,debug: bool=False) -> str:
+    # 转换为小写进行处理，确保不区分大小写
+    arg = arg.lower()
     raw_result=FDQueryMethods.get_dram_detail(arg, refresh)
     result = result_to_text(raw_result)
-    if result: raw_result["accept"]()
+    if result and hasattr(raw_result, "accept"):
+        raw_result.accept()
     if not result:
         result = "无结果"
     return result
@@ -594,17 +818,28 @@ def get_message_result(message: str) -> str:
         message=args[0]
         refresh_flag="refresh" in args
         debug_flag="debug" in args
+        if(debug_flag):
+            print(args)
+        count="".join([(arg.split("=")[-1].strip() if arg.startswith("count") else "") for arg in args])
+        count=10 if not count else int(count)
+
+        url="".join([(arg.split("=")[-1].strip() if arg.startswith("url") else "") for arg in args])
+        if url:
+            url=url.strip().strip("/")
+        else:
+            url=None
+
         result = ""
-        # 新增：处理DRAM查询指令（支持大小写不敏感）
+        # 处理DRAM查询指令（支持大小写不敏感）
         if message.lower().startswith("查dram"):
-            result = 查DRAM(message[6:].strip(), refresh=refresh_flag,debug=debug_flag)
+            result = 查DRAM(message[6:].strip(), refresh=refresh_flag,debug=debug_flag,url=url)
         # 原有Flash查询指令
         elif message.lower().startswith(("id")):
-            result = ID(message[2:].strip(), refresh=refresh_flag,debug=debug_flag)
+            result = ID(message[2:].strip(), refresh=refresh_flag,debug=debug_flag,url=url)
         elif message.startswith(("查")):
-            result = 查(message[1:].strip(), refresh=refresh_flag,debug=debug_flag)
+            result = 查(message[1:].strip(), refresh=refresh_flag,debug=debug_flag,url=url) 
         elif message.startswith(("搜")):
-            result = 搜(message[1:].strip(),debug=debug_flag)
+            result = 搜(message[1:].strip(),debug=debug_flag,count=count,url=url)
         else:
             result = "未知命令(请使用/help获取帮助)"
         return result
@@ -632,6 +867,14 @@ if __name__ == "__main__":
         plugin_config = Config.from_file()
     instance()
 
+# reload
+# reload
+# reload
+# reload
+# reload
+# reload
+# reload
+# reload
 # reload
 # reload
 # reload

@@ -1,0 +1,61 @@
+{
+  "flash_detail": {
+    "mt29f8t08ewleem5-qk:e": {
+      "data": {
+        "partNumber": "MT29F8T08EWLEEM5-QK:E",
+        "vendor": "美光",
+        "type": "NAND",
+        "density": "8Tb",
+        "deviceWidth": "x8",
+        "processNode": "未知",
+        "cellLevel": "TLC",
+        "classification": {
+          "ce": 4,
+          "ch": 2,
+          "rb": "未知",
+          "die": 16
+        },
+        "voltage": "Vcc: 2.5V (2.35–3.60V), VccQ: 1.2V (1.14–1.26V)",
+        "generation": "5",
+        "接口": {
+          "async": "是",
+          "sync": "是"
+        },
+        "package": "132/187 ball LBGA, 12 x 18 x 1.5",
+        "extraInfo": {
+          "企业级": "否",
+          "生产状态": "量产",
+          "操作温度": "商用 (0°C 到 +70°C)"
+        },
+        "flashId": [
+          "2CE38A32EA30"
+        ],
+        "controller": [
+          "SM2259XT",
+          "SM2259XT2",
+          "SM2263XT",
+          "PS3111",
+          "INIC6081"
+        ],
+        "remark": "",
+        "rawDensity": 8388608,
+        "interface": {
+          "async": true,
+          "sync": true
+        },
+        "rawVendor": "micron"
+      }
+    }
+  },
+  "micron_pn_decode": {
+    "nv048": {
+      "data": {
+        "category": "Unknown",
+        "fbga-code": "NV048",
+        "page-url": "None",
+        "part-number": "MT29F8T08EWLEEM5-QK:E",
+        "sub-category": "Unknown"
+      }
+    }
+  }
+}

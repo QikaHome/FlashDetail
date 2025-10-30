@@ -1,142 +1,15 @@
 import json
 import requests
-import sqlite3
 import os
 from bs4 import BeautifulSoup
 import urllib3
 
 from .FDConfig import config_instance as config
+from .FDJsonDatabase import save_to_database, get_from_database
 
 # 抑制因忽略SSL验证产生的警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-# 数据库路径
-DB_PATH = os.path.join(os.path.dirname(__file__), 'flash_data.db')
-
-# 初始化数据库
-def init_database():
-    """初始化SQLite数据库和表结构"""
-    try:
-        # 确保目录存在
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        
-        # 连接数据库
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 创建flash详情表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS flash_detail (
-            part_number TEXT PRIMARY KEY,
-            data TEXT NOT NULL,
-            timestamp INTEGER DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # 创建dram详情表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS dram_detail (
-            part_number TEXT PRIMARY KEY,
-            data TEXT NOT NULL,
-            timestamp INTEGER DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # 创建flash ID详情表
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS flash_id_detail (
-            flash_id TEXT PRIMARY KEY,
-            data TEXT NOT NULL,
-            timestamp INTEGER DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # 创建micron_pn_decode表，用于存储镁光料号解码结果
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS micron_pn_decode (
-            part_number TEXT PRIMARY KEY,
-            data TEXT NOT NULL,
-            timestamp INTEGER DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
-        
-        # 创建索引提升查询性能
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_flash_timestamp ON flash_detail(timestamp)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_dram_timestamp ON dram_detail(timestamp)')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_flash_id_timestamp ON flash_id_detail(timestamp)')
-        
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"数据库初始化失败: {str(e)}")
-
-# 数据库读写函数
-def save_to_database(table_name, key, data):
-    """保存数据到数据库，只存储data部分"""
-    try:
-        # 只保存字典中的data部分，避免存储accept方法
-        if isinstance(data, dict):
-            # 创建一个新字典，只包含result和data字段
-            save_data = {
-                "result": data.get("result", False),
-                "data": data.get("data", {})
-            }
-            # 如果有error字段也保存
-            if "error" in data:
-                save_data["error"] = data["error"]
-        else:
-            save_data = data
-            
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        json_data = json.dumps(save_data)
-        
-        # 使用UPSERT语法（SQLite 3.24+支持）
-        cursor.execute(
-            f"INSERT OR REPLACE INTO {table_name} VALUES (?, ?, CURRENT_TIMESTAMP)",
-            (key, json_data)
-        )
-        
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"保存到数据库失败: {str(e)}")
-        return False
-
-def get_from_database(table_name, key):
-    """从数据库获取数据，并确保返回格式正确"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        # 根据不同的表名确定正确的主键名
-        if table_name == 'flash_id_detail':
-            primary_key = 'flash_id'
-        elif table_name == 'micron_pn_decode':
-            primary_key = 'part_number'
-        else:
-            primary_key = table_name[:-7]  # 移除"_detail"后缀
-            
-        cursor.execute(f"SELECT data FROM {table_name} WHERE {primary_key} = ?", (key,))
-        result = cursor.fetchone()
-        
-        conn.close()
-        
-        if result:
-            data = json.loads(result[0])
-            # 确保返回的字典格式正确，包含result和data字段
-            if isinstance(data, dict):
-                # 为返回的数据添加accept方法（空操作，因为数据已经在数据库中）
-                data["accept"] = lambda: None
-            return data
-        return None
-    except Exception as e:
-        print(f"从数据库读取失败: {str(e)}")
-        return None
-
-# 初始化数据库
-init_database()
+       
 
 # 容量单位转换函数
 def format_density(arg,width:int=8) -> str:
@@ -209,6 +82,32 @@ def get_html_with_requests(url: str,debug: bool=False) -> requests.Response:
         print(f"HTTP请求失败: {str(e)}")
         return None
 
+def get_from_flash_detector(postfix:str,debug: bool=False,url:str|None=None) -> requests.Response:
+    """从闪存检测器API获取数据"""
+    if url:
+        response = get_html_with_requests(f"{url}/{postfix}",debug)
+        if response:
+            return response
+    if not url:
+        for u in config.flash_detect_api_urls:
+            response = get_html_with_requests(f"{u}/{postfix}",debug)
+            if response and response.status_code == 200:
+                return response
+    return None
+
+def get_from_flash_extra(postfix:str,debug: bool=False,url:str|None=None) -> requests.Response:
+    """从闪存额外信息API获取数据"""
+    if url:
+        response = get_html_with_requests(f"{url}/{postfix}",debug)
+        if response:
+            return response
+    if not url:
+        for u in config.flash_extra_api_urls:
+            response = get_html_with_requests(f"{u}/{postfix}",debug)
+            if response and response.status_code == 200:
+                return response
+    return None
+
 # 十六进制验证函数
 def is_hex(s: str) -> bool:
     """检查字符串是否全为十六进制字符"""
@@ -218,7 +117,7 @@ def is_hex(s: str) -> bool:
     except ValueError:
         return False
 
-def get_detail(arg: str, refresh: bool = False,debug: bool=False) -> dict:
+def get_detail(arg: str, refresh: bool = False,debug: bool=False,url:str|None=None) -> dict:
     """获取闪存料号详细信息
     
     Args:
@@ -226,6 +125,7 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False) -> dict:
         firstTime: 是否首次查询
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        url: 自定义API URL      
         
     Returns:
         查询结果字典，包含accept方法用于保存数据到数据库
@@ -239,16 +139,17 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False) -> dict:
     try:
         # 尝试从缓存获取数据（如果不是强制刷新）
         if not refresh:
-            cached_data = get_from_database('flash_detail', arg)
+            # 使用arg.lower()确保不区分大小写查询
+            cached_data = get_from_database('flash_detail', arg.lower(),debug)
             if cached_data:
                 # 为缓存数据添加accept方法（不执行任何操作，因为已经在数据库中）
                 cached_data["accept"] = lambda: None
                 return cached_data
                 
-        if is_hex(arg) and arg.startswith("89","45","2C","EC","AD","98","9B"):
+        if is_hex(arg) and arg.startswith(("89","45","2C","EC","AD","98","9B")):
             return get_detail_from_ID(arg,debug)
             
-        html = get_html_with_requests(f"{config.flash_detect_api_url}/decode?lang=chs&pn={arg}",debug)
+        html = get_from_flash_detector(f"decode?lang=chs&pn={arg}",debug,url)
         if not html:
             result = {"result": False, "error": "API请求失败"}
             result["accept"] = lambda: None
@@ -261,7 +162,7 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False) -> dict:
             # 添加accept方法，仅在调用时保存数据到数据库
             if result.get("result"):
                 def accept_func():
-                    save_to_database('flash_detail', arg, result)
+                    save_to_database('flash_detail', arg.lower(), result,debug)
                     # 移除accept方法，避免重复调用
                     if "accept" in result:
                         del result["accept"]
@@ -283,12 +184,14 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False) -> dict:
         return result
 
 
-def search(arg: str,debug: bool=False) -> dict:
+def search(arg: str,debug: bool=False,count: int=10,url:str|None=None) -> dict:
     """搜索闪存料号
     
     Args:
         arg: 搜索关键词
         debug: 是否开启调试模式
+        count: 返回结果数量（默认10条）
+        url: 自定义API URL
         
     Returns:
         搜索结果字典
@@ -297,7 +200,7 @@ def search(arg: str,debug: bool=False) -> dict:
         return {"result": False, "error": "搜索关键词不能为空"}
     
     try:
-        html = get_html_with_requests(f"{config.flash_detect_api_url}/searchPn?limit=10&lang=chs&pn={arg}",debug)
+        html = get_from_flash_detector(f"searchPn?limit={count}&lang=chs&pn={arg}",debug,url)
         if not html:
             return {"result": False, "error": "API请求失败"}
             
@@ -314,13 +217,14 @@ def search(arg: str,debug: bool=False) -> dict:
         return {"result": False, "error": str(e)}
 
 
-def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False) -> dict:
+def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,url:str|None=None) -> dict:
     """通过闪存ID获取详细信息
     
     Args:
         arg: 闪存ID
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        url: 自定义API URL
         
     Returns:
         查询结果字典，包含accept方法用于保存数据到数据库
@@ -345,12 +249,13 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False) -> dic
         
         # 尝试从缓存获取数据（如果不是强制刷新）
         if not refresh:
-            cached_data = get_from_database('flash_id_detail', id_str)
+            # 使用id_str.lower()确保不区分大小写查询
+            cached_data = get_from_database('flash_id_detail', id_str.lower(),debug)
             if cached_data:
                 cached_data["accept"] = lambda: None
                 return cached_data
                 
-        html = get_html_with_requests(f"{config.flash_detect_api_url}/decodeId?lang=chs&id={id_str}")
+        html = get_from_flash_detector(f"decodeId?lang=chs&id={id_str}",debug,url)
         if not html:
             result = {"result": False, "error": "API请求失败"}
             result["accept"] = lambda: None
@@ -363,7 +268,7 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False) -> dic
             # 添加accept方法，仅在调用时保存数据到数据库
             if result.get("result"):
                 def accept_func():
-                    save_to_database('flash_id_detail', id_str, result)
+                    save_to_database('flash_id_detail', id_str.lower(), result,debug)
                     # 移除accept方法，避免重复调用
                     if "accept" in result:
                         del result["accept"]
@@ -386,13 +291,14 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False) -> dic
 
 
 # Micron料号解析函数
-def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False) -> dict:
+def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False,url:str|None=None) -> dict:
     """解析Micron PN
     
     Args:
         arg: 镁光料号
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        url: 自定义API URL
         
     Returns:
         查询结果字典，包含accept方法用于保存数据到数据库
@@ -406,14 +312,15 @@ def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False) -> dict:
     
     # 尝试从缓存获取数据（如果不是强制刷新）
     if not refresh:
-        cached_data = get_from_database('micron_pn_decode', pn)
+        # 使用pn.lower()确保不区分大小写查询
+        cached_data = get_from_database('micron_pn_decode', pn.lower(),debug)
+        if debug:
+            print(cached_data)
         if cached_data:
-            cached_data["accept"] = lambda: None
             return cached_data
     
     # 访问micron-online接口获取完整part-number
-    micron_url = f"{config.flash_extra_api_url}/micron-online?param={pn}"
-    micron_response = get_html_with_requests(micron_url, debug)
+    micron_response = get_from_flash_extra(f"micron-online?param={pn}", debug,url) 
     if not micron_response:
         result = {"result": False, "error": "解码镁光料号失败"}
         result["accept"] = lambda: None
@@ -423,21 +330,20 @@ def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False) -> dict:
         # 尝试解析JSON响应
         response_data = json.loads(micron_response.text)
         # 确保返回的数据结构包含必要字段
-        if "detail" not in response_data and "part-number" in response_data:
-            # 如果part-number直接在根级别，将其移到detail字典中以保持一致性
-            response_data["detail"] = {"part-number": response_data["part-number"]}
-        
+        response_data["data"]=response_data["detail"]
+        response_data["detail"]=None
         # 添加accept方法，仅在调用时保存数据到数据库
         if response_data.get("result", True):  # 如果没有result字段，默认为True
             def accept_func():
-                save_to_database('micron_pn_decode', pn, response_data)
+                save_to_database('micron_pn_decode', pn.lower(), response_data,debug)
                 # 移除accept方法，避免重复调用
                 if "accept" in response_data:
                     del response_data["accept"]
             response_data["accept"] = accept_func
         else:
             response_data["accept"] = lambda: None
-        
+        if debug:
+            print(response_data)
         return response_data
     except json.JSONDecodeError:
         result = {"result": False, "error": "返回数据格式错误"}
@@ -449,12 +355,14 @@ def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False) -> dict:
         return result
 
 # DRAM料号查询函数
-def get_dram_detail(arg: str, refresh: bool = False) -> dict:
+def get_dram_detail(arg: str, refresh: bool = False, debug: bool=False,url:str|None=None) -> dict:
     """查询DRAM详情（适配DRAM专属API）
     
     Args:
         arg: DRAM料号
         refresh: 是否强制刷新数据（不使用缓存）
+        debug: 是否开启调试模式
+        url: 自定义API URL
         
     Returns:
         查询结果字典，包含accept方法用于保存数据到数据库
@@ -475,11 +383,9 @@ def get_dram_detail(arg: str, refresh: bool = False) -> dict:
             return result
         
         # 获取完整的part-number并使用它调用DRAM接口
-        # 兼容不同的数据结构：part-number可能在detail字典或直接在根级别
-        if "detail" in micron_json and "part-number" in micron_json["detail"]:
-            full_pn = micron_json["detail"]["part-number"]
-        elif "part-number" in micron_json:
-            full_pn = micron_json["part-number"]
+        # 兼容不同的数据结构：part-number可能在data字典或直接在根级别
+        if "data" in micron_json and "part-number" in micron_json["data"]:
+            full_pn = micron_json["data"]["part-number"]
         else:
             result = {"result": False, "error": "获取完整DRAM料号失败：找不到part-number字段"}
             result["accept"] = lambda: None
@@ -490,15 +396,15 @@ def get_dram_detail(arg: str, refresh: bool = False) -> dict:
     
     # 如果不强制刷新，先尝试从数据库读取
     if not refresh:
-        cached_data = get_from_database('dram_detail', full_pn)
+        # 使用full_pn.lower()确保不区分大小写查询
+        cached_data = get_from_database('dram_detail', full_pn.lower(),debug)
         if cached_data:
             cached_data["accept"] = lambda: None
             return cached_data
     
     try:
         # 使用原始料号或从micron-online获取的完整料号调用DRAM接口
-        url = f"{config.flash_extra_api_url}/DRAM?param={full_pn}"
-        response = get_html_with_requests(url)
+        response = get_from_flash_extra(f"DRAM?param={full_pn}", debug,url)
         if not response:
             result = {"result": False, "error": "DRAM API请求失败"}
             result["accept"] = lambda: None
@@ -525,7 +431,7 @@ def get_dram_detail(arg: str, refresh: bool = False) -> dict:
         
         # 添加accept方法，仅在调用时保存数据到数据库
         def accept_func():
-            save_to_database('dram_detail', full_pn, result)
+            save_to_database('dram_detail', full_pn.lower(), result,debug)
             # 移除accept方法，避免重复调用
             if "accept" in result:
                 del result["accept"]

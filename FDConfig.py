@@ -8,12 +8,14 @@ import os
 class Config(BaseModel):
     # 核心配置字段
     admin_users: list[str] = ["1828665870"]  # 默认管理员包含所有者
-    flash_detect_api_url: str = "https://fd.sakuracg.com"
-    flash_extra_api_url: str = "https://fe-backend.barryblueice.cn"
+    flash_detect_api_urls: list[str] = ["https://fd.sakuracg.com"]
+    flash_extra_api_urls: list[str] = ["https://fe-backend.barryblueice.cn"]    
+    configs: dict[str, Any] = {"auto_join_group": True,"repeater": 4,"cat": True}  #其他非核心配置项
     whitelist_user: list[str] = []
     blacklist_user: list[str] = []
     whitelist_group: list[str] = []
     blacklist_group: list[str] = []
+
 
     # 新增：所有者ID（拥有最高权限）
     owner: str = "1828665870"  # 默认所有者
@@ -29,10 +31,10 @@ class Config(BaseModel):
                 raise ValueError("所有者ID必须为字符串")
         return v
 
-    @field_validator("flash_detect_api_url", "flash_extra_api_url")
-    def api_url_must_be_valid(cls, v: str) -> str:
-        if not (v.startswith("http://") or v.startswith("https://")):
-            raise ValueError("API URL必须以http://或https://开头")
+    @field_validator("flash_detect_api_urls", "flash_extra_api_urls")
+    def api_url_must_be_valid(cls, v: list[str]) -> list[str]:
+        if not all((url.startswith("http://") or url.startswith("https://")) for url in v):
+            raise ValueError("API URL列表元素必须以http://或https://开头")
         return v
 
     def save_all(self, path: str = None) -> None:
