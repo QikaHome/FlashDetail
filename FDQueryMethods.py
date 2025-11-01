@@ -117,7 +117,7 @@ def is_hex(s: str) -> bool:
     except ValueError:
         return False
 
-def get_detail(arg: str, refresh: bool = False,debug: bool=False,url:str|None=None) -> dict:
+def get_detail(arg: str, refresh: bool = False,debug: bool=False,save: bool=True,url:str|None=None) -> dict:
     """获取闪存料号详细信息
     
     Args:
@@ -125,6 +125,7 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False,url:str|None=No
         firstTime: 是否首次查询
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        save: 是否保存到数据库
         url: 自定义API URL      
         
     Returns:
@@ -147,7 +148,7 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False,url:str|None=No
                 return cached_data
                 
         if is_hex(arg) and arg.startswith(("89","45","2C","EC","AD","98","9B")):
-            return get_detail_from_ID(arg,debug)
+            return get_detail_from_ID(arg=arg,refresh=refresh,debug=debug,save=save,url=url)
             
         html = get_from_flash_detector(f"decode?lang=chs&pn={arg}",debug,url)
         if not html:
@@ -160,7 +161,7 @@ def get_detail(arg: str, refresh: bool = False,debug: bool=False,url:str|None=No
         if p_tags:
             result = json.loads(p_tags.get_text())
             # 添加accept方法，仅在调用时保存数据到数据库
-            if result.get("result"):
+            if result.get("result") and save:
                 def accept_func():
                     save_to_database('flash_detail', arg.lower(), result,debug)
                     # 移除accept方法，避免重复调用
@@ -217,13 +218,15 @@ def search(arg: str,debug: bool=False,count: int=10,url:str|None=None) -> dict:
         return {"result": False, "error": str(e)}
 
 
-def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,url:str|None=None) -> dict:
+def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,save: bool=False,local: bool=True,url:str|None=None) -> dict:
     """通过闪存ID获取详细信息
     
     Args:
         arg: 闪存ID
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        save: 是否保存到数据库
+        local: 是否使用本地算法解码
         url: 自定义API URL
         
     Returns:
@@ -236,16 +239,15 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,url:str
     
     try:
         # 提取有效字符（字母/数字）
-        id_clean = []
+        id_str= ""
         for c in arg:
-            if c.isalnum():
-                id_clean.append(c)
-            if len(id_clean) >= 12:
+            if c.upper() in ["0","1","2","3","4","5","6","7","8","9","A","B","C","D","E","F"]:
+                id_str += c.upper()
+            if len(id_str) >= 12:
                 break  # 超过12位则截断
         # 不足12位则补0
-        if len(id_clean) < 12:
-            id_clean += ['0'] * (12 - len(id_clean))
-        id_str = ''.join(id_clean[:12])  # 确保正好12位
+        if len(id_str) < 12:
+            id_str += '0' * (12 - len(id_str))  
         
         # 尝试从缓存获取数据（如果不是强制刷新）
         if not refresh:
@@ -254,19 +256,60 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,url:str
             if cached_data:
                 cached_data["accept"] = lambda: None
                 return cached_data
+        result={}
+        # 本地算法解码
+        if local:
+            data={}
+            data["id"]=id_str
+            def get_die_cellLevel(id_str: str) -> tuple:
+                die_cellLevel=int(id_str[5],16)
+                return ["1","2","4","8"][die_cellLevel%4],["SLC","MLC","TLC","QLC"][die_cellLevel//4]
+            DENSITY_MAPPING1 = {
+                "D3": "1GB", "D5": "2GB", "D7": "4GB", "DE": "8GB",
+                "3A": "16GB", "5A": "16GB",  # 16GB有两种编码
+                "3C": "32GB", "5C": "32GB",  # 32GB有两种编码
+                "3E": "64GB", 
+                "48": "128GB", "5E": "128GB", "7E": "128GB",  # 128GB有三种编码
+                "49": "256GB", "89": "256GB",  # 256GB有两种编码
+                "40": "512GB", "41": "1TB", "58": "160GB"
+            }
+            if id_str.startswith(("98","45")):
+                result["result"] = True
+                data["vendor"]={"98":"东芝/恺侠","45":"闪迪/西数"}[id_str[:2]]
+                data["density"] = DENSITY_MAPPING1.get(id_str[2:4], "未知")
+                data["die"],data["cellLevel"]=get_die_cellLevel(id_str)
+                data["pageSize"] = ["2","4","8","16"][int(id_str[7],16)%4]
+                data["totalPlane"]={"76":"2","7A":"4","7E":"8","F2":"16"}[id_str[8:10]]
+                pn1=int(id_str[10],16)%8
+                pn2=int(id_str[11],16)%8
+                p_n=str(pn1)+str(pn2)
+                data["processNode"]={"71":"BiCS2","72":"BiCS3","63":"BiCS4(.5)","64":"BiCS5","65":"BiCS6",
+                    "51":"15nm(1z)","50":"A19nm(1y)","57":"19nm(1x)","56":"24nm"
+                }[p_n]
+            if id_str.startswith("AD"):
+                result["result"] = True
+                data["vendor"]="海力士"
+                data["density"] = DENSITY_MAPPING1.get(id_str[2:4], "未知")
+                data["die"],data["cellLevel"]=get_die_cellLevel(id_str)
+                data["pageSize"] = ["2","4","8","16"][int(id_str[7],16)%4]
+                data["totalPlane"] = ["1","2","4","8"][int(id_str[4],16)%4]
+                data["processNode"]={"42":"32nm","4A":"16nm","50":"14nm","60":"3DV1","70":"3DV2","80":"3DV3","90":"3DV4","A0":"3DV5","B0":"3DV6","C0":"3DV7","D0":"3DV8"}.get(id_str[10:12],"未知")
+
+            result["data"] = data
+        if not result.get("result",False):
+            html = get_from_flash_detector(f"decodeId?lang=chs&id={id_str}",debug,url)
+            if not html:
+                result = {"result": False, "error": "API请求失败"}
+                result["accept"] = lambda: None
+                return result
                 
-        html = get_from_flash_detector(f"decodeId?lang=chs&id={id_str}",debug,url)
-        if not html:
-            result = {"result": False, "error": "API请求失败"}
-            result["accept"] = lambda: None
-            return result
-            
-        soup = BeautifulSoup(html.text, 'lxml')
-        p_tags = soup.find('p')
-        if p_tags:
-            result = json.loads(p_tags.get_text())
+            soup = BeautifulSoup(html.text, 'lxml')
+            p_tags = soup.find('p')
+            if p_tags:
+                result = json.loads(p_tags.get_text())
             # 添加accept方法，仅在调用时保存数据到数据库
-            if result.get("result"):
+        if result.get("result",False) :
+            if save:
                 def accept_func():
                     save_to_database('flash_id_detail', id_str.lower(), result,debug)
                     # 移除accept方法，避免重复调用
@@ -291,13 +334,14 @@ def get_detail_from_ID(arg: str, refresh: bool = False,debug: bool=False,url:str
 
 
 # Micron料号解析函数
-def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False,url:str|None=None) -> dict:
+def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False,save: bool=True,url:str|None=None) -> dict:
     """解析Micron PN
     
     Args:
         arg: 镁光料号
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        save: 是否保存到数据库
         url: 自定义API URL
         
     Returns:
@@ -333,7 +377,7 @@ def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False,url:str|N
         response_data["data"]=response_data["detail"]
         response_data["detail"]=None
         # 添加accept方法，仅在调用时保存数据到数据库
-        if response_data.get("result", True):  # 如果没有result字段，默认为True
+        if response_data.get("result", True) and save:  # 如果没有result字段，默认为True
             def accept_func():
                 save_to_database('micron_pn_decode', pn.lower(), response_data,debug)
                 # 移除accept方法，避免重复调用
@@ -355,13 +399,14 @@ def parse_micron_pn(arg: str, refresh: bool = False, debug: bool=False,url:str|N
         return result
 
 # DRAM料号查询函数
-def get_dram_detail(arg: str, refresh: bool = False, debug: bool=False,url:str|None=None) -> dict:
+def get_dram_detail(arg: str, refresh: bool = False, debug: bool=False,save: bool=True,url:str|None=None) -> dict:
     """查询DRAM详情（适配DRAM专属API）
     
     Args:
         arg: DRAM料号
         refresh: 是否强制刷新数据（不使用缓存）
         debug: 是否开启调试模式
+        save: 是否保存到数据库
         url: 自定义API URL
         
     Returns:
@@ -430,12 +475,15 @@ def get_dram_detail(arg: str, refresh: bool = False, debug: bool=False,url:str|N
         }
         
         # 添加accept方法，仅在调用时保存数据到数据库
-        def accept_func():
-            save_to_database('dram_detail', full_pn.lower(), result,debug)
-            # 移除accept方法，避免重复调用
-            if "accept" in result:
-                del result["accept"]
-        result["accept"] = accept_func
+        if save:
+            def accept_func():
+                save_to_database('dram_detail', full_pn.lower(), result,debug)
+                # 移除accept方法，避免重复调用
+                if "accept" in result:
+                    del result["accept"]
+            result["accept"] = accept_func
+        else:
+            result["accept"] = lambda: None
         
         return result
     except json.JSONDecodeError:

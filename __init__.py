@@ -144,7 +144,7 @@ FlashDetail插件使用说明
             # 获取被回复的消息ID
             reply_message_id = event.reply.message_id
             # 检查是否是管理员或者撤回目标是用户自己的消息
-            if not is_admin(event.get_user_id()) and not event.get_user_id() != event.reply.sender:
+            if (not is_admin(event.get_user_id())) and (event.get_user_id() != event.reply.sender):
                 return
             try:
                 # 尝试撤回消息
@@ -428,8 +428,8 @@ FlashDetail插件使用说明
         result = FDQueryMethods.parse_micron_pn(pn, refresh=refresh, debug=debug)
         
         # 如果查询成功，调用accept()方法保存到数据库
-        if result.get("result") and hasattr(result, "accept"):
-            result.accept()
+        if result.get("result") and "accept" in result:
+            result["accept"]()
         
         # 检查并返回part-number
         if "data" in result and "part-number" in result["data"]:
@@ -709,7 +709,7 @@ def flashId(arg: list[str]) -> str:
 
 
 translations = {
-    "id": "", "vendor": "厂商：", "die": "Die数量：", "plane": "平面数：",
+    "id": "", "vendor": "厂商：", "die": "Die数量：", "plane": "平面数：","totalPlane": "总平面数/Ce：",
     "pageSize": "页面大小：", "blockSize": "块大小：", "processNode": "制程：",
     "cellLevel": "单元类型：", "partNumber": "料号：", "type": "类型：", "density": "容量：",
     "channel": "通道数：","ce": "片选：","die": "Die数量：","availablePn": "可能的料号：",
@@ -749,45 +749,45 @@ def all_numbers_alpha(string: str) -> bool:
     # 使用正则表达式判断字符是否在0-9A-Za-z_/:-范围内
     return string and all(re.match(r'^[0-9A-Za-z_/:\-]$', c) for c in string)
 
-def ID(arg: str, refresh: bool=False,debug: bool=False,url:str|None=None) -> str:
+def ID(arg: str, refresh: bool=False,debug: bool=False,save: bool=False,local: bool=True,url:str|None=None) -> str:
     # 转换为小写进行处理，确保不区分大小写
     arg = arg.lower()
-    raw_result=FDQueryMethods.get_detail_from_ID(arg, refresh,debug,url)
+    raw_result=FDQueryMethods.get_detail_from_ID(arg=arg, refresh=refresh,debug=debug,save=save,local=local,url=url)   
     result = result_to_text(raw_result)
-    if result and hasattr(raw_result, "accept"):
-        raw_result.accept()
+    if result and "accept" in raw_result:
+        raw_result["accept"]()
     if not result and len(arg)>3:
         if all_numbers_alpha(arg):
             result = "无结果"
     return result
 
-def 查(arg: str, retry: bool=True, refresh: bool=False,debug: bool=False,url:str|None=None) -> str:
+def 查(arg: str, retry: bool=True, refresh: bool=False,debug: bool=False,save: bool=False,url:str|None=None) -> str:
     # 转换为小写进行处理，确保不区分大小写
     arg = arg.lower()
-    raw_result=FDQueryMethods.get_detail(arg, refresh,debug,url)
+    raw_result=FDQueryMethods.get_detail(arg=arg, refresh=refresh,debug=debug,save=save,url=url)
     result = result_to_text(raw_result)
     if result and "accept" in raw_result:
         raw_result["accept"]()
     if not result and retry:
-        search_result = FDQueryMethods.search(arg,debug,url)
+        search_result = FDQueryMethods.search(arg=arg,debug=debug,url=url)
         if search_result.get("result", False) and search_result.get("data", []):
-            result = f"可能的料号：{search_result["data"][0].split()[-1]}\n{查(search_result["data"][0].split()[-1], False,debug,url)}"
+            result = f"可能的料号：{search_result["data"][0].split()[-1]}\n{查(search_result["data"][0].split()[-1], False,refresh,debug,save,url)}"
     if not result and len(arg.strip())==5:
-        micron_result=FDQueryMethods.parse_micron_pn(arg.strip(), refresh,debug)        
+        micron_result=FDQueryMethods.parse_micron_pn(arg.strip(), refresh=refresh,debug=debug)        
         if micron_result.get("result", False) and micron_result.get("data", {}).get("part-number", ""):
             if "accept" in micron_result:
                 micron_result["accept"]()
-            result = f"镁光料号：{micron_result.get('data', {}).get('part-number', '')}\n{查(micron_result.get('data', {}).get('part-number', ''), False,debug,url)}"
+            result = f"镁光料号：{micron_result.get('data', {}).get('part-number', '')}\n{查(micron_result.get('data', {}).get('part-number', ''), False,refresh,debug,save,url)}"
         else: result = f"未知料号：{micron_result.get('error', '未知错误')}"
     if not result:
         if all_numbers_alpha(arg):
             result = "无结果"
     return result
 
-def 搜(arg: str,debug: bool=False,count: int=10) -> str:
+def 搜(arg: str,debug: bool=False,count: int=10,url:str|None=None) -> str:
     # 转换为小写进行处理，确保不区分大小写
     arg = arg.lower()
-    raw_result = FDQueryMethods.search(arg,debug,count)
+    raw_result = FDQueryMethods.search(arg,debug,count,url)
     result = result_to_text(raw_result)
     if not result:
         if all_numbers_alpha(arg):
@@ -796,13 +796,13 @@ def 搜(arg: str,debug: bool=False,count: int=10) -> str:
 
 
 
-def 查DRAM(arg: str, refresh: bool=False,debug: bool=False) -> str:
+def 查DRAM(arg: str, refresh: bool=False,debug: bool=False,save: bool=False,url:str|None=None) -> str:
     # 转换为小写进行处理，确保不区分大小写
     arg = arg.lower()
-    raw_result=FDQueryMethods.get_dram_detail(arg, refresh)
+    raw_result=FDQueryMethods.get_dram_detail(arg=arg, refresh=refresh,debug=debug,save=save,url=url)
     result = result_to_text(raw_result)
-    if result and hasattr(raw_result, "accept"):
-        raw_result.accept()
+    if result and "accept" in raw_result:
+        raw_result["accept"]()
     if not result:
         result = "无结果"
     return result
@@ -810,14 +810,16 @@ def 查DRAM(arg: str, refresh: bool=False,debug: bool=False) -> str:
 def get_message_result(message: str) -> str:
     try:
         
-        # 如果有参数且长度超过32，则返回错误信息
-        if len(message) > 32:
-            return "查询参数过长，请输入不超过32个字符"
+        # 如果有参数且长度超过72，则返回错误信息
+        if len(message) > 72:
+            return "查询参数过长，请输入不超过72个字符"
         args = message.split("--")
         args = [arg.strip() for arg in args]
         message=args[0]
         refresh_flag="refresh" in args
         debug_flag="debug" in args
+        save_flag=True if "save" in args else False if "nosave" in args else None
+        local_flag=True if "local" in args else False if "online" in args else None
         if(debug_flag):
             print(args)
         count="".join([(arg.split("=")[-1].strip() if arg.startswith("count") else "") for arg in args])
@@ -831,15 +833,22 @@ def get_message_result(message: str) -> str:
 
         result = ""
         # 处理DRAM查询指令（支持大小写不敏感）
+        # 创建基础参数字典
+        kwargs = {"refresh": refresh_flag, "debug": debug_flag}
+        if save_flag is not None:
+            kwargs["save"] = save_flag
+        if local_flag is not None:
+            kwargs["local"] = local_flag
+        if url is not None:
+            kwargs["url"] = url
         if message.lower().startswith("查dram"):
-            result = 查DRAM(message[6:].strip(), refresh=refresh_flag,debug=debug_flag,url=url)
-        # 原有Flash查询指令
+            result = 查DRAM(message[6:].strip(), **kwargs)
         elif message.lower().startswith(("id")):
-            result = ID(message[2:].strip(), refresh=refresh_flag,debug=debug_flag,url=url)
+            result = ID(message[2:].strip(), **kwargs)
         elif message.startswith(("查")):
-            result = 查(message[1:].strip(), refresh=refresh_flag,debug=debug_flag,url=url) 
+            result = 查(message[1:].strip(), **kwargs) 
         elif message.startswith(("搜")):
-            result = 搜(message[1:].strip(),debug=debug_flag,count=count,url=url)
+            result = 搜(message[1:].strip(),**kwargs)
         else:
             result = "未知命令(请使用/help获取帮助)"
         return result
@@ -867,14 +876,3 @@ if __name__ == "__main__":
         plugin_config = Config.from_file()
     instance()
 
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload
-# reload

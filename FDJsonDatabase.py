@@ -1,6 +1,7 @@
 import json
 import os
 import threading
+import time
 from typing import Dict, Any, Optional
 
 class JsonDatabase:
@@ -15,6 +16,8 @@ class JsonDatabase:
         self.db_path = db_path
         self.lock = threading.RLock()  # 使用可重入锁确保线程安全
         self.data = self._load_data()
+        # 记录文件的最后修改时间
+        self._last_modified_time = self._get_file_mtime()
     
     def _load_data(self) -> Dict[str, Dict[str, Any]]:
         """从文件加载数据
@@ -34,6 +37,29 @@ class JsonDatabase:
             print(f"加载JSON数据库失败: {e}")
             return {}
     
+    def _get_file_mtime(self) -> float:
+        """获取文件的最后修改时间
+        
+        Returns:
+            文件的最后修改时间戳
+        """
+        if os.path.exists(self.db_path):
+            return os.path.getmtime(self.db_path)
+        return 0
+    
+    def _check_and_reload_data(self):
+        """检查文件是否被修改，如果被修改则重新加载数据
+        """
+        current_mtime = self._get_file_mtime()
+        if current_mtime > self._last_modified_time:
+            # 文件已被修改，重新加载数据
+            with self.lock:
+                # 再次检查，避免在获取锁的过程中发生变化
+                if current_mtime > self._last_modified_time:
+                    print(f"检测到JSON数据库文件已被修改，重新加载数据")
+                    self.data = self._load_data()
+                    self._last_modified_time = current_mtime
+    
     def _save_data(self) -> bool:
         """保存数据到文件
         
@@ -43,6 +69,8 @@ class JsonDatabase:
         try:
             with open(self.db_path, 'w', encoding='utf-8') as f:
                 json.dump(self.data, f, ensure_ascii=False, indent=2)
+            # 更新最后修改时间
+            self._last_modified_time = self._get_file_mtime()
             return True
         except IOError as e:
             print(f"保存JSON数据库失败: {e}")
@@ -58,6 +86,9 @@ class JsonDatabase:
         Returns:
             查询结果，如果不存在返回None
         """
+        # 检查文件是否被手动修改，如果被修改则重新加载数据
+        self._check_and_reload_data()
+        
         with self.lock:
             if table_name not in self.data:
                 return None
@@ -185,7 +216,7 @@ def get_from_database(table_name: str, key: str, debug: bool = False) -> Optiona
     """
     try:
         # 从数据库获取数据
-        result = db_instance.get(table_name, key)
+        result = db_instance.get(table_name, key).copy()
         
         if debug:
             print(f"从JSON数据库读取: {table_name} - {key} - {result}")
@@ -193,6 +224,7 @@ def get_from_database(table_name: str, key: str, debug: bool = False) -> Optiona
         # 如果获取到数据，添加accept方法（空操作）
         if result and isinstance(result, dict):
             result["accept"] = lambda: None
+            result["result"] =True
         
         return result
     except Exception as e:

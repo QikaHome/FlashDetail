@@ -1,60 +1,130 @@
 {
-  "flash_detail": {
-    "mt29f8t08ewleem5-qk:e": {
+  "flash_id_detail": {
+    "455897937ed1": {
       "data": {
-        "partNumber": "MT29F8T08EWLEEM5-QK:E",
-        "vendor": "美光",
+        "id": "455897937ED1",
+        "vendor": "闪迪/西数",
+        "density": "160GB",
+        "die": "5",
+        "cellLevel": "MLC",
+        "pageSize": "16",
+        "processNode": "15nm(1z)"
+      }
+    }
+  },
+  "flash_detail": {
+    "k9phgy8s7c": {
+      "data": {
+        "partNumber": "K9PHGY8S7C",
+        "vendor": "三星",
         "type": "NAND",
-        "density": "8Tb",
+        "density": "512Gb",
         "deviceWidth": "x8",
         "processNode": "未知",
-        "cellLevel": "TLC",
+        "cellLevel": "MLC",
         "classification": {
-          "ce": 4,
-          "ch": 2,
-          "rb": "未知",
-          "die": 16
+          "ce": 8,
+          "ch": "未知",
+          "rb": 4,
+          "die": 8
         },
-        "voltage": "Vcc: 2.5V (2.35–3.60V), VccQ: 1.2V (1.14–1.26V)",
-        "generation": "5",
+        "voltage": "Vcc: 3.3V (3V~3.6V), VccQ: 1.8V (1.65V~1.95V)",
+        "generation": "4",
+        "接口": {
+          "TogDDR版本": "是"
+        },
+        "package": "未知",
+        "extraInfo": {
+          "TogDDR版本": "2.0",
+          "无铅": "否",
+          "无卤": "否",
+          "铜工艺": "否",
+          "操作温度": "未知",
+          "坏块": "未知"
+        },
+        "flashId": [],
+        "controller": [],
+        "remark": "未知",
+        "rawDensity": 524288,
+        "interface": {
+          "toggle": true
+        },
+        "rawVendor": "samsung"
+      }
+    },
+    "29f16b08ccme2": {
+      "data": {
+        "partNumber": "29F16B08CCME2",
+        "vendor": "英特尔",
+        "type": "NAND",
+        "density": "128Gb",
+        "deviceWidth": "x8",
+        "processNode": "25 nm",
+        "cellLevel": "MLC",
+        "classification": {
+          "ce": 2,
+          "ch": 1,
+          "rb": 2,
+          "die": 2
+        },
+        "voltage": "Vcc: 3.3V, VccQ: 1.8V/1.2V",
+        "generation": "2",
         "接口": {
           "async": "是",
           "sync": "是"
         },
-        "package": "132/187 ball LBGA, 12 x 18 x 1.5",
+        "package": "未知",
         "extraInfo": {
-          "企业级": "否",
-          "生产状态": "量产",
-          "操作温度": "商用 (0°C 到 +70°C)"
+          "晶圆": "否"
         },
-        "flashId": [
-          "2CE38A32EA30"
-        ],
-        "controller": [
-          "SM2259XT",
-          "SM2259XT2",
-          "SM2263XT",
-          "PS3111",
-          "INIC6081"
-        ],
-        "remark": "",
-        "rawDensity": 8388608,
+        "flashId": [],
+        "controller": [],
+        "remark": "未知",
+        "rawDensity": 131072,
         "interface": {
           "async": true,
           "sync": true
         },
-        "rawVendor": "micron"
+        "rawVendor": "intel"
       }
-    }
-  },
-  "micron_pn_decode": {
-    "nv048": {
+    },
+    "k9ukgy8scd": {
       "data": {
-        "category": "Unknown",
-        "fbga-code": "NV048",
-        "page-url": "None",
-        "part-number": "MT29F8T08EWLEEM5-QK:E",
-        "sub-category": "Unknown"
+        "partNumber": "K9UKGY8SCD",
+        "vendor": "三星",
+        "type": "NAND",
+        "density": "1Tb",
+        "deviceWidth": "x8",
+        "processNode": "未知",
+        "cellLevel": "MLC",
+        "classification": {
+          "ce": 16,
+          "ch": "未知",
+          "rb": 2,
+          "die": 16
+        },
+        "voltage": "Vcc: 3.3V (3V~3.6V), VccQ: 1.8V (1.65V~1.95V)",
+        "generation": "5",
+        "接口": {
+          "TogDDR版本": "是"
+        },
+        "package": "未知",
+        "extraInfo": {
+          "TogDDR版本": "2.0",
+          "无铅": "否",
+          "无卤": "否",
+          "铜工艺": "否",
+          "操作温度": "未知",
+          "坏块": "未知"
+        },
+        "flashId": [],
+        "controller": [],
+        "remark": "未知",
+        "rawDensity": 1048576,
+        "interface": {
+          "toggle": true
+        },
+        "rawVendor": "samsung"
       }
     }
   }
